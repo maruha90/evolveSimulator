@@ -1,0 +1,21 @@
+
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "outDir": "./dist-server",
+    "rootDir": "./server",
+    "allowSyntheticDefaultImports": true
+  },
+
+  "include": [
+    "server/**/*.ts",
+  ],
+
+  "exclude": ["node_modules", "dist", "dist-server"]
+}
