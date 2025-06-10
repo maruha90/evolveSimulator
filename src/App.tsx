@@ -1,6 +1,6 @@
 // src/App.tsx
 
-import React, { useEffect, useState, useCallback } from 'react'; // useCallback を追加
+import React, { useEffect, useState, useCallback, useMemo } from 'react'; // useCallback を追加
 import './index.css';
 import Card from './components/Card';
 import { io } from 'socket.io-client';
@@ -41,6 +41,7 @@ interface GameState {
 
 
 function App() {
+  // --- 1. すべての useState の定義をここに集める ---
   const [clientGameState, setClientGameState] = useState<GameState>({
     players: {},
     turnPlayerId: null,
@@ -49,32 +50,46 @@ function App() {
   const [message, setMessage] = useState<string>(''); // サーバーからのメッセージ表示用
 
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
-  // stateの定義
-  const [selectedTarget, setSelectedTarget] = useState<{ type: 'follower' | 'leader', id: string } | null>(null);
-
-  // 攻撃対象の選択状態を管理
   const [selectedAttackerId, setSelectedAttackerId] = useState<string | null>(null);
-  const [selectedTargetId, setSelectedTargetId] = useState<string | null>(null);
+  const [selectedTargetId, setSelectedTargetId] = useState<string | null>(null); // ★ selectedTargetId の定義をここに移動
 
-  const myPlayerId = socket.id; // Socket ID をプレイヤーIDとして使用
-  // 現在のプレイヤーの状態、相手の状態、ターン情報などを取得
+
+  // --- 2. ステートから派生する値を定義する (useMemo も含む) ---
+  const myPlayerId = socket.id;
+
   const myPlayerState = clientGameState.players[myPlayerId] || null;
   const otherPlayerStates = Object.values(clientGameState.players).filter(p => p.id !== myPlayerId);
   const opponentPlayerState = otherPlayerStates[0] || null;
-  const isMyTurn = myPlayerId === clientGameState.turnPlayerId;
 
-  // 手札と場のカードリストを計算
   const myHandCards = myPlayerState?.hand || [];
   const myFieldCards = myPlayerState?.field || [];
   const opponentFieldCards = opponentPlayerState?.field || [];
 
+  const isMyTurn = myPlayerId === clientGameState.turnPlayerId;
+
   // 選択中のカードが手札にあるか、場にあるか、そのカードオブジェクトを取得
   const selectedHandCard = myHandCards.find(card => card.instanceId === selectedCardId);
-  const selectedFieldCard = myFieldCards.find(card => card.instanceId === selectedCardId);
+  const selectedAttackerCard = myFieldCards.find(card => card.instanceId === selectedAttackerId);
 
 
+  // ★ selectedTarget の定義をここに移動
+  // selectedTargetId に依存するので、selectedTargetId の定義より後に置く
+  const selectedTarget = useMemo(() => {
+    if (selectedTargetId === 'leader') { // 'leader' という特殊なIDを使う場合
+      return { type: 'leader', id: opponentPlayerState?.id || '' };
+    }
+    const targetFollower = opponentFieldCards.find(card => card.instanceId === selectedTargetId);
+    if (targetFollower) {
+      return { type: 'follower', id: targetFollower.instanceId };
+    }
+    return null;
+  }, [selectedTargetId, opponentPlayerState, opponentFieldCards]);
 
-  // カードクリックハンドラー (カードの選択/選択解除用)
+
+  // --- 3. useCallback を使ったイベントハンドラーを定義する ---
+  // handleCardClick, handlePlaySelectedCard, handleAttack, handleLeaderClick をここに配置
+  // 依存配列に正しいステートや関数を含めることを忘れずに！
+
   const handleCardClick = useCallback((card: CardData) => {
     console.log("Card clicked:", card);
 
@@ -93,35 +108,34 @@ function App() {
             if (selectedAttackerId === card.instanceId) {
                 console.log("Attack cancelled: Deselected attacker.");
                 setSelectedAttackerId(null);
-                setSelectedTargetId(null);
-                setSelectedCardId(null); // 他の選択も解除
+                setSelectedTargetId(null); // selectedTargetId を null にする
+                setSelectedCardId(null);
             } else {
                 // 自分の別のフォロワーをクリックしたら、攻撃者を変更
                 console.log("Attacker changed:", card.instanceId);
                 setSelectedAttackerId(card.instanceId);
-                setSelectedTargetId(null);
-                setSelectedCardId(card.instanceId); // UIの選択状態も更新
+                setSelectedTargetId(null); // ターゲットをリセット
+                setSelectedCardId(card.instanceId);
             }
-            return; // 自分のフォロワーのクリックはここで処理終了
+            return;
         }
 
         // 相手の場のフォロワーを選択した場合
         const isOpponentFollower = opponentPlayerState?.field.some(f => f.instanceId === card.instanceId);
         if (isOpponentFollower) {
             console.log("Target selected (opponent follower):", card.instanceId);
-            setSelectedTargetId(card.instanceId); // 攻撃対象として選択
-            setMessage("攻撃するフォロワーを選択しました。攻撃ボタンを押してください。"); // UIメッセージ
-            return; // 攻撃対象の選択はここで処理終了
+            setSelectedTargetId(card.instanceId); // 攻撃対象のinstanceIdをセット
+            setMessage("攻撃するフォロワーと対象を選択しました。攻撃ボタンを押してください。");
+            return;
         }
 
         // ここに到達した場合、無効なターゲットがクリックされた
         setMessage("無効な攻撃対象です。相手のフォロワーかリーダーを選択してください。");
-        setSelectedTargetId(null); // 無効なターゲットを選択解除
+        setSelectedTargetId(null);
         return;
     }
 
     // --- 通常のカード選択フェーズ --- (selectedAttackerId が null の場合)
-
     // 手札のカードの場合 (プレイするために選択)
     const isInHand = myPlayerState.hand.some(c => c.instanceId === card.instanceId);
     if (isInHand) {
@@ -131,7 +145,9 @@ function App() {
         } else {
             setSelectedCardId(card.instanceId); // 選択
         }
-        return; // 手札のカードのクリックはここで処理終了
+        setSelectedAttackerId(null); // 攻撃者選択はリセット
+        setSelectedTargetId(null); // ターゲット選択もリセット
+        return;
     }
 
     // 場の自分のフォロワーの場合 (攻撃者として選択)
@@ -140,11 +156,12 @@ function App() {
         console.log("Card is in field for selection (potential attacker).");
         // フォロワーであり、かつ未行動の場合のみ攻撃者として選択可能にする
         if (card.attack !== undefined && card.defense !== undefined && !card.isActed) {
-            if (selectedCardId === card.instanceId && selectedAttackerId === card.instanceId) {
+            if (selectedAttackerId === card.instanceId) {
                 // 既に攻撃者として選択されている場合、選択解除
                 console.log("Deselecting attacker:", card.instanceId);
                 setSelectedAttackerId(null);
                 setSelectedCardId(null);
+                setSelectedTargetId(null);
             } else {
                 // 新しい攻撃者として選択
                 console.log("Selecting attacker:", card.instanceId);
@@ -155,24 +172,25 @@ function App() {
             }
         } else {
             // フォロワーではない、または行動済みの場合
+            console.log("Cannot select for attack: Not a follower or already acted.", card.instanceId);
+            setMessage("このフォロワーは攻撃できません（行動済みかフォロワーではありません）。");
+            // 通常のカード選択状態は維持
             if (selectedCardId === card.instanceId) {
-                console.log("Deselecting non-attacker card in field:", card.instanceId);
-                setSelectedCardId(null);
+                setSelectedCardId(null); // 選択解除
             } else {
-                console.log("Cannot select for attack: Not a follower or already acted.", card.instanceId);
-                setMessage("このフォロワーは攻撃できません（行動済みかフォロワーではありません）。");
                 setSelectedCardId(card.instanceId); // とりあえず選択状態にはする
             }
+            setSelectedAttackerId(null); // 攻撃者ではない
+            setSelectedTargetId(null); // ターゲットではない
         }
-        return; // 場のカードのクリックはここで処理終了
+        return;
     }
 
-    // どの条件にも合致しないカードがクリックされた場合
     console.log("Unhandled card click:", card.instanceId);
 
-}, [myPlayerState, isMyTurn, selectedCardId, selectedAttackerId, opponentPlayerState]);
+  }, [myPlayerState, isMyTurn, selectedCardId, selectedAttackerId, opponentPlayerState, setSelectedTargetId, setSelectedAttackerId, setSelectedCardId, setMessage]);
 
-  // 選択した手札のカードをプレイするハンドラー
+
   const handlePlaySelectedCard = useCallback(() => {
     if (!myPlayerState || !isMyTurn) {
       setMessage('自分のターンではありません。');
@@ -189,54 +207,46 @@ function App() {
       return;
     }
 
-    // フォロワーでないカード（スペルなど）もこのボタンでプレイする場合の考慮
-    // 現時点では、スペルカードの特別な処理はサーバー側で行うと仮定し、
-    // ここでは単にサーバーにプレイ要求を送る
     socket.emit('playCard', selectedHandCard.instanceId);
     setSelectedCardId(null); // プレイしたら選択を解除
-    setMessage(''); // プレイ成功時にメッセージをクリア
-  }, [myPlayerState, isMyTurn, selectedHandCard]); // 依存配列に myPlayerState, isMyTurn, selectedHandCard を追加
+    setSelectedAttackerId(null); // 攻撃者選択も解除
+    setSelectedTargetId(null); // ターゲット選択も解除
+    setMessage('');
+  }, [myPlayerState, isMyTurn, selectedHandCard, setSelectedCardId, setSelectedAttackerId, setSelectedTargetId, setMessage]);
 
 
-
-  // 攻撃を実行するハンドラー
   const handleAttack = useCallback(() => {
     if (!myPlayerState || !isMyTurn) {
       setMessage('自分のターンではありません。');
       return;
     }
-    if (!selectedAttackerId || !selectedTargetId) {
+    if (!selectedAttackerId || !selectedTarget) { // ★ selectedTarget を使用
       setMessage('攻撃するフォロワーと対象を選択してください。');
       return;
     }
 
-    const attacker = myFieldCards.find(f => f.instanceId === selectedAttackerId);
-    const target = opponentFieldCards.find(f => f.instanceId === selectedTargetId); // 相手フォロワーの場合
-
+    // attacker は selectedAttackerCard で取得済みなので、再度 find しなくて良い
+    const attacker = selectedAttackerCard;
     if (!attacker) {
       setMessage('選択された攻撃フォロワーが見つかりません。');
       return;
     }
 
-    // ★ ここでリーダーへの攻撃とフォロワーへの攻撃を区別する必要がある
-    // 現状では target が存在すれば相手フォロワー、なければリーダーと仮定する（要修正）
-    // 例えば、target を { type: 'follower' | 'leader', id: string } のようなオブジェクトにするのが良い
-
     socket.emit('attack', {
       attackerId: selectedAttackerId,
-      targetId: selectedTargetId // これは相手フォロワーのID
-      // targetType: 'follower' // もしくは 'leader'
+      targetId: selectedTarget.id,
+      targetType: selectedTarget.type
     });
 
     // 攻撃後は選択状態を解除
     setSelectedAttackerId(null);
-    setSelectedTargetId(null);
+    setSelectedTargetId(null); // selectedTargetId を null にする
     setSelectedCardId(null);
     setMessage('');
 
-  }, [myPlayerState, isMyTurn, selectedAttackerId, selectedTargetId, myFieldCards, opponentFieldCards]); // 依存配列
+  }, [myPlayerState, isMyTurn, selectedAttackerId, selectedTarget, selectedAttackerCard, setMessage, setSelectedAttackerId, setSelectedTargetId, setSelectedCardId]);
 
-  // handleLeaderClick の追加
+
   const handleLeaderClick = useCallback((playerType: 'opponent' | 'my') => {
       if (!myPlayerState || !isMyTurn || !selectedAttackerId) {
           setMessage('攻撃するフォロワーを選択してからリーダーをクリックしてください。');
@@ -248,18 +258,13 @@ function App() {
       }
 
       console.log("Target selected (opponent leader): Leader");
-      setSelectedTarget({ type: 'leader', id: opponentPlayerState?.id || '' }); // 相手リーダーを選択
-      setMessage("攻撃するフォロワーを選択しました。攻撃ボタンを押してください。");
+      setSelectedTargetId('leader'); // ★ 'leader' という特殊なIDをセット
+      setMessage("攻撃するフォロワーと対象を選択しました。攻撃ボタンを押してください。");
 
-  }, [myPlayerState, isMyTurn, selectedAttackerId, opponentPlayerState]);
+  }, [myPlayerState, isMyTurn, selectedAttackerId, setSelectedTargetId, setMessage]);
 
-  // handleAttack の修正 (targetType を含める)
-  socket.emit('attack', {
-      attackerId: selectedAttackerId,
-      targetId: selectedTarget.id,
-      targetType: selectedTarget.type
-  });
 
+  // --- 4. useEffect を定義する ---
   useEffect(() => {
     socket.on('connect', () => {
       console.log('Connected to server! My Socket ID:', socket.id);
@@ -268,13 +273,12 @@ function App() {
     socket.on('gameStateUpdated', (state: GameState) => {
       console.log('Received game state update:', state);
       setClientGameState(state);
-      setMessage(''); // 新しい状態が来たらメッセージをクリア
-      // ここで setSelectedCardId をリセットしない！
+      setMessage('');
     });
 
     socket.on('message', (msg) => {
       console.log('Message from server (general):', msg);
-      setMessage(msg); // サーバーからのメッセージを表示
+      setMessage(msg);
     });
 
     return () => {
@@ -288,6 +292,7 @@ function App() {
   console.log("Client Side Game State:", clientGameState);
 
 
+  // --- 5. JSX を返す ---
   return (
     <div className="min-h-screen bg-green-900 text-white flex flex-col items-center justify-between p-4 relative">
       {/* ターン表示 */}
@@ -302,16 +307,23 @@ function App() {
         </div>
       )}
 
+
       {/* PP表示 (自分と相手) - 配置を調整 */}
-      // 相手リーダーのライフ表示の div に onClick を追加
       <div
         className="absolute top-4 right-4 text-xl bg-gray-700 p-2 rounded-md shadow-md cursor-pointer"
-        onClick={isMyTurn && selectedAttackerId ? () => handleLeaderClick('opponent') : undefined}
+        onClick={isMyTurn && selectedAttackerId ? () => handleLeaderClick('opponent') : undefined} // ★ リーダーへの攻撃クリックハンドラー
       >
         <p>相手のPP: {opponentPlayerState?.currentPP || 0}/{opponentPlayerState?.maxPP || 0}</p>
-        <p>相手のライフ: {opponentPlayerState?.leaderLife || 0}</p>
+        <p>相手のライフ: {opponentPlayerState?.leaderLife || 0}
+            {selectedTarget?.type === 'leader' && selectedTarget.id === (opponentPlayerState?.id || '') && (
+                <span className="ml-2 px-2 py-1 bg-red-600 rounded-full text-sm">TARGET</span>
+            )}
+        </p>
       </div>
-      <div className="absolute bottom-4 right-4 text-xl bg-gray-700 p-2 rounded-md shadow-md">
+      <div
+        className="absolute bottom-4 right-4 text-xl bg-gray-700 p-2 rounded-md shadow-md cursor-pointer"
+        onClick={isMyTurn && selectedAttackerId ? () => handleLeaderClick('my') : undefined} // 自分のリーダーへのクリック（攻撃不可メッセージ用）
+      >
         <p>自分のPP: {myPlayerState?.currentPP || 0}/{myPlayerState?.maxPP || 0}</p>
         <p>自分のライフ: {myPlayerState?.leaderLife || 0}</p>
       </div>
@@ -335,14 +347,16 @@ function App() {
         カードをプレイ
       </button>
 
+      {/* 攻撃ボタン */}
       <button
-        onClick={handleAttack} // 後で作成するハンドラー
+        onClick={handleAttack}
         className={`bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded shadow-lg mt-2
-          ${!isMyTurn || !selectedAttackerId || !selectedTargetId ? 'opacity-50 cursor-not-allowed' : ''}`}
-        disabled={!isMyTurn || !selectedAttackerId || !selectedTargetId}
+          ${!isMyTurn || !selectedAttackerId || !selectedTarget ? 'opacity-50 cursor-not-allowed' : ''}`}
+        disabled={!isMyTurn || !selectedAttackerId || !selectedTarget}
       >
         攻撃！
       </button>
+
 
       {/* --- 相手のエリア --- */}
       <div className="w-full max-w-6xl bg-gray-800 rounded-lg shadow-xl p-4 flex flex-col items-center mb-4">
@@ -353,23 +367,21 @@ function App() {
           ) : (
             opponentFieldCards.map((card) => (
               <Card
-                key={card.instanceId} // key を instanceId に修正
+                key={card.instanceId}
                 imageSrc={card.image}
                 altText={card.name}
-                // 攻撃対象可能なら緑の枠線などを表示
                 className={`
                   ${card.isActed ? 'rotate-90 transform origin-bottom-left' : ''}
-                  ${isMyTurn && selectedAttackerId && card.attack !== undefined && card.defense !== undefined ? 'hover:border-2 hover:border-green-500' : ''}
-                  ${selectedTarget?.id === card.instanceId && selectedTarget.type === 'follower' ? 'border-4 border-red-500' : ''} // ターゲット選択時のハイライト (任意)
+                  ${selectedAttackerId && isMyTurn ? 'hover:border-2 hover:border-green-500' : ''}
+                  ${selectedTarget?.id === card.instanceId && selectedTarget.type === 'follower' ? 'border-4 border-red-500' : ''}
                 `}
-                onClick={isMyTurn && selectedAttackerId ? () => handleCardClick(card) : undefined} // 攻撃者が選択されている時のみクリック可能
-                isTargetable={isMyTurn && selectedAttackerId && card.attack !== undefined && card.defense !== undefined} // ★ 追加
-                // ★ 攻撃力と体力を渡す
+                onClick={isMyTurn && selectedAttackerId ? () => handleCardClick(card) : undefined}
+                isTargetable={isMyTurn && selectedAttackerId && card.attack !== undefined && card.defense !== undefined}
+                isSelected={false} // 相手のカードは選択状態にならない
                 attack={card.attack}
                 currentDefense={card.currentDefense}
                 maxDefense={card.defense}
-                // isSelected は相手のカードには不要だが、型エラーを避けるため undefined または false
-                isSelected={false}
+                instanceId={card.instanceId}
               />
             ))
           )}
@@ -386,24 +398,21 @@ function App() {
           ) : (
             myFieldCards.map((card) => (
               <Card
-                key={card.instanceId} // key を instanceId に修正
+                key={card.instanceId}
                 imageSrc={card.image}
                 altText={card.name}
-                // 場のカードは常にクリック可能にする (後々攻撃対象選択などで使うため)
-                onClick={isMyTurn ? () => handleCardClick(card) : undefined}
-                isSelected={selectedCardId === card.instanceId} // instanceId で比較
-                isAttackerSelected={selectedAttackerId === card.instanceId} // ★ 追加
-                // 攻撃済みなら半透明にするなどのクラス
                 className={`
                   ${card.isActed ? 'opacity-70 cursor-not-allowed' : ''}
                   ${selectedAttackerId === card.instanceId ? 'border-4 border-yellow-500' : ''}
-                  ${selectedCardId === card.instanceId && !selectedAttackerId ? 'border-4 border-blue-500 shadow-blue-500/50' : ''} // 通常選択時
+                  ${selectedCardId === card.instanceId && !selectedAttackerId ? 'border-4 border-blue-500 shadow-blue-500/50' : ''}
                 `}
-                // ★ 攻撃力と体力を渡す
+                onClick={isMyTurn ? () => handleCardClick(card) : undefined}
+                isSelected={selectedCardId === card.instanceId}
+                isAttackerSelected={selectedAttackerId === card.instanceId}
                 attack={card.attack}
                 currentDefense={card.currentDefense}
                 maxDefense={card.defense}
-                instanceId={card.instanceId} // CardコンポーネントにもinstanceIdを渡す
+                instanceId={card.instanceId}
               />
             ))
           )}
@@ -415,23 +424,20 @@ function App() {
           ) : (
             myHandCards.map((card) => (
               <Card
-                key={card.instanceId} // key を instanceId に修正
+                key={card.instanceId}
                 imageSrc={card.image}
                 altText={card.name}
                 className={
-                    // 手札のカードは、自分のターンでPPが足りる場合のみアクティブな見た目にする
-                    // クリックは常に可能にし、onClickで選択状態を切り替える
                     isMyTurn && myPlayerState && card.cost <= myPlayerState.currentPP
                         ? ''
-                        : 'opacity-50' // PP不足でもクリックはできるが、見た目を暗く
+                        : 'opacity-50'
                 }
-                onClick={isMyTurn ? () => handleCardClick(card) : undefined} // 自分のターンのみクリック可能
-                isSelected={selectedCardId === card.instanceId} // 手札のカードも選択状態を反映
-                // ★ 攻撃力と体力を渡す (手札のカードにも)
+                onClick={isMyTurn ? () => handleCardClick(card) : undefined}
+                isSelected={selectedCardId === card.instanceId}
                 attack={card.attack}
                 currentDefense={card.currentDefense}
                 maxDefense={card.defense}
-                instanceId={card.instanceId} // CardコンポーネントにもinstanceIdを渡す
+                instanceId={card.instanceId}
               />
             ))
           )}
