@@ -43,9 +43,14 @@ interface GameState {
 function App() {
   // --- 1. すべての useState の定義をここに集める ---
   const [clientGameState, setClientGameState] = useState<GameState>({
-    players: {},
+    players: {}, // players プロパティを空のオブジェクトで初期化
+    myPlayerState: {} as PlayerState, // 初期値を適当に設定 (後でサーバーから来るデータで上書きされる)
+    opponentPlayerState: { // 初期値を適当に設定
+        id: '', name: '', handCount: 0, field: [], currentPP: 0, maxPP: 0, leaderLife: 0
+    },
     turnPlayerId: null,
     gameStarted: false,
+    turn: 0,
   });
   const [message, setMessage] = useState<string>(''); // サーバーからのメッセージ表示用
 
@@ -57,13 +62,13 @@ function App() {
   // --- 2. ステートから派生する値を定義する (useMemo も含む) ---
   const myPlayerId = socket.id;
 
-  const myPlayerState = clientGameState.players[myPlayerId] || null;
-  const otherPlayerStates = Object.values(clientGameState.players).filter(p => p.id !== myPlayerId);
+  const myPlayerState = clientGameState.players?.[myPlayerId] || null; // ★ 修正: Optional Chaining を追加
+  const otherPlayerStates = Object.values(clientGameState.players || {}).filter(p => p.id !== myPlayerId); // ★ 修正: clientGameState.players が undefined の場合も考慮
   const opponentPlayerState = otherPlayerStates[0] || null;
 
-  const myHandCards = myPlayerState?.hand || [];
-  const myFieldCards = myPlayerState?.field || [];
-  const opponentFieldCards = opponentPlayerState?.field || [];
+  const myHandCards = myPlayerState?.hand || []; // Optional Chaining
+  const myFieldCards = myPlayerState?.field || []; // Optional Chaining
+  const opponentFieldCards = opponentPlayerState?.field || []; // Optional Chaining
 
   const isMyTurn = myPlayerId === clientGameState.turnPlayerId;
 
@@ -273,6 +278,20 @@ function App() {
     socket.on('gameStateUpdated', (state: GameState) => {
       console.log('Received game state update:', state);
       setClientGameState(state);
+
+      // ★★★ ここに追記して、state の詳細な中身を確認してください ★★★
+      console.log('Detailed Game State:');
+      console.log('  My Player State:', state.players[socket.id]);
+      console.log('    My Hand Cards:', state.players[socket.id]?.hand);
+      console.log('    My Field Cards:', state.players[socket.id]?.field);
+      // 相手プレイヤーのIDを取得してから、相手の情報をログに出す
+      const otherPlayerId = Object.keys(state.players).find(id => id !== socket.id);
+      if (otherPlayerId) {
+        console.log('  Opponent Player State:', state.players[otherPlayerId]);
+        console.log('    Opponent Field Cards:', state.players[otherPlayerId]?.field);
+      }
+      // ★★★ ここまで ★★★
+
       setMessage('');
     });
 

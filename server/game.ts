@@ -29,6 +29,7 @@ export interface PlayerState {
 }
 
 export interface GameStateData {
+  players: { [key: string]: PlayerState };
   myPlayerState: PlayerState;
   opponentPlayerState: {
     id: string;
@@ -73,17 +74,21 @@ export class Game {
   private createInitialPlayerState(id: string, name: string): PlayerState {
     // ここで各プレイヤーの初期デッキをロードまたは生成します
     // 例としてダミーのカードデータを使用します
-    const dummyDeck: CardData[] = Array.from({ length: 20 }, (_, i) => ({
-      id: `SD01-${String(i + 1).padStart(3, "0")}`,
-      instanceId: uuidv4(),
-      name: `Dummy Card ${i + 1}`,
-      image: `/cards/SD01-0${(i % 20) + 1}.png`,
-      cost: Math.floor(Math.random() * 5) + 1, // 1から5のランダムなコスト
-      attack: i % 2 === 0 ? Math.floor(Math.random() * 5) + 1 : undefined, // 半分はフォロワー
-      defense: i % 2 === 0 ? Math.floor(Math.random() * 5) + 1 : undefined,
-      currentDefense: undefined, // フォロワーの場合、場に出るときに初期化
-      isActed: undefined, // フォロワーの場合、場に出るときに初期化
-    })).sort(() => Math.random() - 0.5); // デッキをシャッフル
+    const dummyDeck: CardData[] = Array.from({ length: 20 }, (_, i) => {
+      // カード番号 (1から20) を取得し、3桁でゼロ埋めします
+      const cardNumber = String(i + 1).padStart(3, '0');
+      return {
+        id: `SD01-${cardNumber}`,
+        instanceId: uuidv4(),
+        name: `Dummy Card ${i + 1}`,
+        image: `/cards/SD01-${cardNumber}.png`, // ★ この行を修正
+        cost: Math.floor(Math.random() * 5) + 1,
+        attack: i % 2 === 0 ? Math.floor(Math.random() * 5) + 1 : undefined,
+        defense: i % 2 === 0 ? Math.floor(Math.random() * 5) + 1 : undefined,
+        currentDefense: undefined,
+        isActed: undefined,
+      };
+    }).sort(() => Math.random() - 0.5);
 
     return {
       id: id,
@@ -114,12 +119,13 @@ export class Game {
   // 初期手札を配る
   private drawInitialHands() {
     Object.values(this.players).forEach((player) => {
-      for (let i = 0; i < 3; i++) {
-        // 各プレイヤーに3枚ドローさせる
+      for (let i = 0; i < 4; i++) {
+        // 各プレイヤーに4枚ドローさせる
         if (player.deck.length > 0) {
           const card = player.deck.shift();
           if (card) {
             player.hand.push(card);
+            console.log(`Player ${player.name} initial hand:`, player.hand.map(c => c.name)); // ★ 追加
           }
         }
       }
@@ -137,6 +143,7 @@ export class Game {
     }
 
     return {
+      players: this.players,
       myPlayerState: myPlayer,
       opponentPlayerState: {
         id: opponentPlayer.id,
