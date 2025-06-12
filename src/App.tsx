@@ -276,22 +276,22 @@ function App() {
     });
 
     socket.on('gameStateUpdated', (state: GameState) => {
-      console.log('Received game state update:', state);
-      setClientGameState(state);
-
-      // ★★★ ここに追記して、state の詳細な中身を確認してください ★★★
-      console.log('Detailed Game State:');
-      console.log('  My Player State:', state.players[socket.id]);
-      console.log('    My Hand Cards:', state.players[socket.id]?.hand);
-      console.log('    My Field Cards:', state.players[socket.id]?.field);
-      // 相手プレイヤーのIDを取得してから、相手の情報をログに出す
-      const otherPlayerId = Object.keys(state.players).find(id => id !== socket.id);
-      if (otherPlayerId) {
-        console.log('  Opponent Player State:', state.players[otherPlayerId]);
-        console.log('    Opponent Field Cards:', state.players[otherPlayerId]?.field);
+      console.log('--- Game State Update Received ---');
+      console.log('Full State Object:', state); // オブジェクト全体をログに出す
+      console.log('Is My Turn:', state.isMyTurn);
+      console.log('Game Started:', state.gameStarted);
+      console.log('My Player State:', state.players[socket.id]);
+      console.log('My Hand Cards:', state.players[socket.id]?.hand);
+      console.log('My Field Cards:', state.players[socket.id]?.field);
+      // 必要に応じて、相手のカードやライフなども詳細にログに出す
+      const opponentId = Object.keys(state.players).find(id => id !== socket.id);
+      if (opponentId) {
+          console.log('Opponent Player State:', state.players[opponentId]);
+          console.log('Opponent Field Cards:', state.players[opponentId]?.field);
       }
-      // ★★★ ここまで ★★★
+      console.log('--- End Game State Update ---');
 
+      setClientGameState(state);
       setMessage('');
     });
 
@@ -309,6 +309,7 @@ function App() {
 
   // デバッグ用に現在のゲーム状態を表示
   console.log("Client Side Game State:", clientGameState);
+  console.log("Current clientGameState.gameStarted:", clientGameState.gameStarted);
 
 
   // --- 5. JSX を返す ---
